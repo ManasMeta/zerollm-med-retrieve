@@ -76,80 +76,125 @@ class HybridRetriever:
         return sorted_ids
 
     # ─── Main Retrieve ─────────────────────────────────────────────────────────
-    def retrieve(self, query: str, top_k: int = TOP_K, verbose: bool = False):
+    def retrieve(self, query: str, top_k: int = TOP_K, mode: str = "hybrid", verbose: bool = False):
         """
-        Full hybrid retrieval pipeline.
-        Target: sub-100ms end-to-end (excluding model load).
-
-        Returns list of dicts with passage text + scores.
+        Full hybrid retrieval pipeline with Relevance Validation & Adaptive Search.
         """
         t0 = time.time()
+        
+        import feedback
+        from relevance import validate_relevance
 
-        # Step 1: BM25
-        t_bm25 = time.time()
-        bm25_results = self._bm25_retrieve(query, top_k=BM25_TOP_K)
-        bm25_ms = (time.time() - t_bm25) * 1000
+        negative_ids = feedback.get_negative_document_ids(query)
 
-        # Step 2: Dense
-        t_dense = time.time()
-        dense_results = self._dense_retrieve(query, top_k=DENSE_TOP_K)
-        dense_ms = (time.time() - t_dense) * 1000
+        if mode == "dense":
+            t_dense = time.time()
+            dense_results = self._dense_retrieve(query, top_k=DENSE_TOP_K)
+            dense_ms = (time.time() - t_dense) * 1000
+            bm25_ms = 0
+            rrf_ms = 0
+            fused = dense_results
+        else:
+            # Step 1: BM25
+            t_bm25 = time.time()
+            bm25_results = self._bm25_retrieve(query, top_k=BM25_TOP_K)
+            bm25_ms = (time.time() - t_bm25) * 1000
 
-        # Step 3: RRF Fusion
-        t_rrf = time.time()
-        fused = self._rrf_fusion(bm25_results, dense_results)
-        rrf_ms = (time.time() - t_rrf) * 1000
+            # Step 2: Dense
+            t_dense = time.time()
+            dense_results = self._dense_retrieve(query, top_k=DENSE_TOP_K)
+            dense_ms = (time.time() - t_dense) * 1000
 
-        # Step 4: Cross-Encoder Reranking
+            # Step 3: RRF Fusion
+            t_rrf = time.time()
+            fused = self._rrf_fusion(bm25_results, dense_results)
+            rrf_ms = (time.time() - t_rrf) * 1000
+
+        # Filter out user feedback negatives
+        filtered_fused = []
+        for doc_id, score in fused:
+            if 0 <= doc_id < len(self.corpus):
+                doc_str_id = str(self.corpus[doc_id]['id'])
+                if doc_str_id not in negative_ids:
+                    filtered_fused.append((doc_id, score))
+
+        # Step 4: Cross-Encoder Reranking and Relevance Validation
         t_rerank = time.time()
-        rerank_candidates = fused[:RERANK_TOP_K]
+        rerank_candidates = filtered_fused[:RERANK_TOP_K]
         
         cross_inp = []
         for doc_id, _ in rerank_candidates:
-            if 0 <= doc_id < len(self.corpus):
-                cross_inp.append([query, self.corpus[doc_id]["text"]])
-            else:
-                cross_inp.append([query, ""])
+            cross_inp.append([query, self.corpus[doc_id]["text"]])
 
+        results = []
+        confident = False
+        
         if cross_inp:
             cross_scores = self.reranker.predict(cross_inp)
             scored_results = []
-            for i, (doc_id, _) in enumerate(rerank_candidates):
-                if 0 <= doc_id < len(self.corpus):
-                    scored_results.append({
-                        "id":        self.corpus[doc_id]["id"],
-                        "text":      self.corpus[doc_id]["text"],
-                        "rrf_score": round(float(cross_scores[i]), 6),
-                        "doc_idx":   doc_id
-                    })
+            for i, (doc_id, base_score) in enumerate(rerank_candidates):
+                doc = self.corpus[doc_id]
+                val = validate_relevance(query, doc["text"], float(cross_scores[i]))
+                
+                rel_score = val["relevance_score"]
+                if rel_score >= CONFIDENCE_HIGH:
+                    confidence = "high"
+                elif rel_score >= CONFIDENCE_MEDIUM:
+                    confidence = "medium"
+                else:
+                    confidence = "low"
+                    
+                scored_results.append({
+                    "id":        doc["id"],
+                    "text":      doc["text"],
+                    "rrf_score": round(base_score, 6),
+                    "bm25_score": 0.0,
+                    "dense_score": 0.0,
+                    "relevance_score": rel_score,
+                    "confidence": confidence,
+                    "matched_concepts": val["matched_concepts"],
+                    "missing_concepts": val["missing_concepts"],
+                    "doc_idx":   doc_id
+                })
             
-            # Sort by cross_encoder score
-            scored_results = sorted(scored_results, key=lambda x: x["rrf_score"], reverse=True)
-            results = scored_results[:top_k]
-        else:
-            results = []
+            # Sort by Relevance Score
+            scored_results = sorted(scored_results, key=lambda x: x["relevance_score"], reverse=True)
+            
+            # Adaptive Retrieval Check
+            # Only consider results above the medium threshold
+            confident_results = [r for r in scored_results if r["relevance_score"] >= CONFIDENCE_MEDIUM]
+            
+            if confident_results:
+                confident = True
+                results = confident_results[:top_k]
+            else:
+                confident = False
+                results = []
+        
         rerank_ms = (time.time() - t_rerank) * 1000
-
         total_ms = (time.time() - t0) * 1000
 
         if verbose:
             print(f"\n{'-'*50}")
             print(f"Query     : {query[:80]}...")
-            print(f"BM25      : {bm25_ms:.1f}ms")
-            print(f"Dense     : {dense_ms:.1f}ms")
-            print(f"RRF       : {rrf_ms:.1f}ms")
-            print(f"Rerank    : {rerank_ms:.1f}ms")
-            print(f"Total     : {total_ms:.1f}ms {'[OK]' if total_ms < LATENCY_TARGET_MS else '[FAIL] OVER TARGET'}")
-            print(f"Results   : {len(results)} passages")
+            print(f"Total     : {total_ms:.1f}ms")
+            print(f"Results   : {len(results)} confident passages")
             print(f"{'-'*50}")
 
-        return results, {
-            "total_ms":  round(total_ms, 2),
-            "bm25_ms":   round(bm25_ms, 2),
-            "dense_ms":  round(dense_ms, 2),
-            "rrf_ms":    round(rrf_ms, 2),
-            "rerank_ms": round(rerank_ms, 2),
-            "hit_target": total_ms < LATENCY_TARGET_MS
+        return {
+            "query": query,
+            "results": results,
+            "latency_ms": round(total_ms, 2),
+            "mode": mode,
+            "confident": confident,
+            "timing": {
+                "total_ms":  round(total_ms, 2),
+                "bm25_ms":   round(bm25_ms, 2),
+                "dense_ms":  round(dense_ms, 2),
+                "rrf_ms":    round(rrf_ms, 2),
+                "rerank_ms": round(rerank_ms, 2),
+                "hit_target": total_ms < LATENCY_TARGET_MS
+            }
         }
 
     def add_document(self, text: str, question: str = "", label: str = ""):

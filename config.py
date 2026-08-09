@@ -35,3 +35,7 @@ CORPUS_PATH      = "indexes/corpus.pkl"
 
 # Latency target
 LATENCY_TARGET_MS = 500
+
+# Confidence Thresholds
+CONFIDENCE_HIGH = 0.70
+CONFIDENCE_MEDIUM = 0.40
