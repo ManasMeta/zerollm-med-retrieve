@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zero-LLM Medical Retrieval</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <!-- Background elements for visual flair -->
+    <div class="bg-blur shape-1"></div>
+    <div class="bg-blur shape-2"></div>
+
+    <main class="container">
+        <header class="header">
+            <div class="badge">Sub-100ms Architecture</div>
+            <h1>Medical Document Retrieval</h1>
+            <p class="subtitle">Lightning-fast semantic and keyword search across medical literature without LLMs on the hot path.</p>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <div class="tabs-nav">
+            <button class="tab-btn active" id="tab-btn-search">Search Engine</button>
+            <button class="tab-btn" id="tab-btn-add">Add Document</button>
+        </div>
+
+        <!-- Search Tab Content -->
+        <div id="tab-content-search" class="tab-panel">
+            <section class="search-section">
+                <form id="search-form" class="search-bar">
+                    <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input type="text" id="search-input" placeholder="e.g. What is the recommended treatment for Type 2 diabetes?" autocomplete="off" required>
+                    <button type="submit" class="search-button">
+                        <span>Search</span>
+                        <div class="loader-spinner" style="display: none;"></div>
+                    </button>
+                </form>
+                
+                <div class="quick-queries">
+                    <span class="chip">Risk factors for cardiovascular disease</span>
+                    <span class="chip">How does metformin work?</span>
+                    <span class="chip">Prognosis for early-stage lung cancer</span>
+                </div>
+            </section>
+        </div>
+
+        <!-- Add Document Tab Content -->
+        <div id="tab-content-add" class="tab-panel hidden">
+            <section class="add-section">
+                <form id="add-document-form" class="add-form">
+                    <h3>Index New Medical Literature</h3>
+                    <p class="form-subtitle">Embed and fuse new clinical guidelines or study abstracts into the active local index in real-time.</p>
+                    
+                    <div class="form-group">
+                        <label for="doc-text">Document Passage / Guidelines (Required)</label>
+                        <textarea id="doc-text" rows="6" placeholder="Enter clinical text, treatment protocol, or research abstract..." required></textarea>
+                    </div>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="doc-question">Question Context (Optional)</label>
+                            <input type="text" id="doc-question" placeholder="e.g. What is the recommended dosage for Metformin?">
+                        </div>
+                        <div class="form-group">
+                            <label for="doc-label">Final Decision / Label (Optional)</label>
+                            <input type="text" id="doc-label" placeholder="e.g. yes, no, maybe">
+                        </div>
+                    </div>
+
+                    <button type="submit" class="submit-button">
+                        <span>Add to Index</span>
+                        <div class="loader-spinner" style="display: none;"></div>
+                    </button>
+                </form>
+            </section>
+        </div>
+
+
+        <section id="results-container" class="results-section">
+            <div id="metrics-bar" class="metrics-bar hidden">
+                <div class="metric"><span class="metric-label">Total Latency:</span> <span id="metric-total" class="metric-value">-- ms</span></div>
+                <div class="metric"><span class="metric-label">BM25 (Sparse):</span> <span id="metric-bm25" class="metric-value">-- ms</span></div>
+                <div class="metric"><span class="metric-label">FAISS (Dense):</span> <span id="metric-dense" class="metric-value">-- ms</span></div>
+                <div class="metric"><span class="metric-label">RRF Fusion:</span> <span id="metric-rrf" class="metric-value">-- ms</span></div>
+            </div>
+
+            <div id="results-list" class="results-list">
+                <!-- Results will be dynamically injected here -->
+            </div>
+            
+            <div id="empty-state" class="empty-state">
+                <div class="empty-icon">🔍</div>
+                <h3>Ready to search</h3>
+                <p>Enter a query above to scan the medical corpus.</p>
+            </div>
+        </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
